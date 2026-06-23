@@ -126,7 +126,9 @@ logisticServer <- function(id, dataset_pool, active_dataset) {
       res <- model_obj()
       if (is.character(res)) return(cat("Awaiting valid model parameters..."))
       preds <- predict(res$model)
-      table(Predicted = preds, Actual = res$data[[input$y]])
+      op <- options(width = 1000)
+      on.exit(options(op))
+      print(table(Predicted = preds, Actual = res$data[[input$y]]))
     })
 
     output$accuracy <- renderText({

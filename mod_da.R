@@ -380,7 +380,9 @@ daServer <- function(id, dataset_pool, active_dataset) {
     output$lda_matrix <- renderPrint({
       res <- model_obj()
       if (is.character(res)) return(cat("Awaiting valid model..."))
-      table(Predicted = res$pred_class, Actual = res$data[[input$category]])
+      op <- options(width = 1000)
+      on.exit(options(op))
+      print(table(Predicted = res$pred_class, Actual = res$data[[input$category]]))
     })
 
     output$lda_accuracy <- renderText({

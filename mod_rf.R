@@ -95,6 +95,8 @@ rfServer <- function(id, dataset_pool, active_dataset) {
     output$summary <- renderPrint({
       obj <- rf_model_obj()
       if (is.null(obj)) return(cat("Awaiting model training..."))
+      op <- options(width = 1000)
+      on.exit(options(op))
       print(obj$model)
       if (!is.null(obj$cv)) {
         cat("\n\n--- 10-Fold CV Error by Number of Variables ---\n")
