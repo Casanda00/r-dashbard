@@ -74,7 +74,8 @@ dataToolsUI <- function(id) {
 
           accordion_panel("Aggregation",
             selectInput(ns("group_id"), "Aggregate by:", choices = NULL),
-            pickerInput(ns("group_nums"), "Numeric Columns to Average:", choices = NULL, multiple = TRUE, options = list(`actions-box` = TRUE, `live-search` = TRUE)),
+            selectInput(ns("agg_method"), "Aggregation Method:", choices = c("Average" = "mean", "Sum" = "sum", "Median" = "median", "Min" = "min", "Max" = "max")),
+            pickerInput(ns("group_nums"), "Numeric Columns to Aggregate:", choices = NULL, multiple = TRUE, options = list(`actions-box` = TRUE, `live-search` = TRUE)),
             pickerInput(ns("group_cats"), "Categorical Columns to Keep:", choices = NULL, multiple = TRUE, options = list(`actions-box` = TRUE, `live-search` = TRUE, `selected-text-format` = "count > 2", `count-selected-text` = "{0} columns selected")),
             actionButton(ns("apply_group"), "Aggregate Data", class = "btn-primary btn-sm", width = "100%")
           ),
@@ -287,6 +288,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       }, error = function(e) rep(TRUE, length(col_data)))
       keep_idx[is.na(keep_idx)] <- FALSE
       df <- df[keep_idx, , drop = FALSE]
+      df <- droplevels(df)
       rv$working_data <- df
       dataset_pool[[active_dataset()]] <- df
       showNotification(paste("Filter applied. Rows remaining:", nrow(df)), type = "message")
@@ -379,13 +381,22 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     # ---- Aggregation ----
     observeEvent(input$apply_group, {
-      req(rv$working_data, input$group_id, input$group_nums, input$group_cats)
+      req(rv$working_data, input$group_id, input$group_nums, input$group_cats, input$agg_method)
       df <- rv$working_data
       tryCatch({
         safe_nums <- paste0("`", input$group_nums, "`")
         safe_id <- paste0("`", input$group_id, "`")
         num_form <- as.formula(paste("cbind(", paste(safe_nums, collapse = ","), ") ~", safe_id))
-        plot_nums <- aggregate(num_form, data = df, FUN = mean, na.rm = TRUE)
+        
+        agg_fun <- switch(input$agg_method, 
+                          "mean" = mean, 
+                          "sum" = sum, 
+                          "median" = median, 
+                          "min" = min, 
+                          "max" = max, 
+                          mean)
+
+        plot_nums <- aggregate(num_form, data = df, FUN = agg_fun, na.rm = TRUE)
         cat_cols <- c(input$group_id, input$group_cats)
         plot_cats <- unique(df[, cat_cols, drop = FALSE])
         plot_data <- merge(plot_nums, plot_cats, by = input$group_id)
@@ -430,7 +441,17 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
               backtick_nums <- paste0("`", safe_nums, "`")
               backtick_id <- paste0("`", grp_id, "`")
               num_form <- as.formula(paste("cbind(", paste(backtick_nums, collapse = ","), ") ~", backtick_id))
-              plot_nums <- aggregate(num_form, data = df, FUN = mean, na.rm = TRUE)
+              
+              agg_method <- isolate(input$agg_method)
+              agg_fun <- switch(agg_method, 
+                          "mean" = mean, 
+                          "sum" = sum, 
+                          "median" = median, 
+                          "min" = min, 
+                          "max" = max, 
+                          mean)
+
+              plot_nums <- aggregate(num_form, data = df, FUN = agg_fun, na.rm = TRUE)
               cat_cols <- c(grp_id, safe_cats)
               plot_cats <- unique(df[, cat_cols, drop = FALSE])
               df <- merge(plot_nums, plot_cats, by = grp_id)
@@ -525,7 +546,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       keep_idx[is.na(keep_idx)] <- TRUE
       
       df <- df[keep_idx, , drop = FALSE]
-      df[[col]] <- droplevels(as.factor(df[[col]]))
+      df <- droplevels(df)
       
       rv$working_data <- df
       dataset_pool[[active_dataset()]] <- df
@@ -534,7 +555,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
         raw_keep <- !(as.character(raw[[col]]) %in% input$delete_levels)
         raw_keep[is.na(raw_keep)] <- TRUE
         raw <- raw[raw_keep, , drop = FALSE]
-        raw[[col]] <- droplevels(as.factor(raw[[col]]))
+        raw <- droplevels(raw)
         raw_pool[[active_dataset()]] <- raw
       }
       
@@ -560,7 +581,10 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
     output$eng_table <- renderPrint({
       req(rv$working_data, input$eng_view_col)
       vec <- rv$working_data[[input$eng_view_col]]
-      if (is.numeric(vec)) summary(vec) else table(vec, useNA = "ifany")
+      if (is.numeric(vec)) summary(vec) else {
+        if (is.factor(vec)) vec <- droplevels(vec)
+        table(vec, useNA = "ifany")
+      }
     })
 
     eng_plot_fn <- function() {
@@ -571,6 +595,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
         boxplot(vec, horizontal = TRUE, main = paste("Distribution of", input$eng_view_col), xlab = input$eng_view_col, col = "lightgray", outline = TRUE)
         stripchart(vec, method = "jitter", add = TRUE, pch = 16, col = rgb(0,0,0,0.25), cex = 0.8)
       } else {
+        if (is.factor(vec)) vec <- droplevels(vec)
         par(mar = c(4.5, 12, 2, 1))
         counts <- rev(sort(table(vec)))
         barplot(counts, horiz = TRUE, las = 1, main = paste("Frequencies of", input$eng_view_col), col = "lightgray", cex.names = 0.9, xlab = "Count")
