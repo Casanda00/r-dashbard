@@ -532,7 +532,8 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$delete_lvl_col, {
       req(rv$working_data, input$delete_lvl_col)
-      levels_avail <- unique(as.character(na.omit(rv$working_data[[input$delete_lvl_col]])))
+      levels_avail <- unique(as.character(rv$working_data[[input$delete_lvl_col]]))
+      levels_avail[is.na(levels_avail)] <- "NA"
       updateSelectInput(session, "delete_levels", choices = levels_avail)
     })
 
@@ -542,8 +543,9 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       raw <- raw_pool[[active_dataset()]]
       
       col <- input$delete_lvl_col
-      keep_idx <- !(as.character(df[[col]]) %in% input$delete_levels)
-      keep_idx[is.na(keep_idx)] <- TRUE
+      col_data <- as.character(df[[col]])
+      col_data[is.na(col_data)] <- "NA"
+      keep_idx <- !(col_data %in% input$delete_levels)
       
       df <- df[keep_idx, , drop = FALSE]
       df <- droplevels(df)
@@ -552,8 +554,9 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       dataset_pool[[active_dataset()]] <- df
       
       if (col %in% names(raw)) {
-        raw_keep <- !(as.character(raw[[col]]) %in% input$delete_levels)
-        raw_keep[is.na(raw_keep)] <- TRUE
+        raw_col_data <- as.character(raw[[col]])
+        raw_col_data[is.na(raw_col_data)] <- "NA"
+        raw_keep <- !(raw_col_data %in% input$delete_levels)
         raw <- raw[raw_keep, , drop = FALSE]
         raw <- droplevels(raw)
         raw_pool[[active_dataset()]] <- raw
