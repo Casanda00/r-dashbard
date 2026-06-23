@@ -10,6 +10,7 @@ server <- function(input, output, session) {
   # Shared data state (re-used by every component).
   raw_pool     <- reactiveValues()   # untouched uploads
   dataset_pool <- reactiveValues()   # working/edited datasets
+  raster_pool  <- reactiveValues()   # shared SpatRaster objects (RS search → Raster Analysis)
 
   dataset_names <- reactive({ names(reactiveValuesToList(dataset_pool)) })
 
@@ -101,13 +102,16 @@ server <- function(input, output, session) {
   clust_ctx <- clusteringServer("clustering", dataset_pool, active_dataset)
   clf_ctx   <- classificationServer("classification", dataset_pool, active_dataset)
   da_ctx    <- daServer("da", dataset_pool, active_dataset)
-  lidar_ctx <- lidarServer("lidar", dataset_pool)
+  lidar_ctx  <- lidarServer("lidar", dataset_pool)
+  raster_ctx <- rasterServer("raster", dataset_pool, active_dataset, raster_pool)
+  rs_ctx     <- rsSearchServer("rs_search", dataset_pool, active_dataset, raster_pool)
 
   module_ctx <- list(
     data = data_ctx,
     lm = lm_ctx, lme = lme_ctx, anova = anova_ctx, logistic = log_ctx, rf = rf_ctx,
     clustering = clust_ctx, classification = clf_ctx, da = da_ctx,
-    pointcloud = lidar_ctx, chm_itd = lidar_ctx, metrics = lidar_ctx
+    pointcloud = lidar_ctx, chm_itd = lidar_ctx, metrics = lidar_ctx,
+    raster = raster_ctx, rs_search = rs_ctx
   )
 
   chatServer("chat", dataset_pool, active_dataset, reactive(input$current_view), module_ctx)

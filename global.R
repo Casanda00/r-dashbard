@@ -34,6 +34,20 @@ library(terra)
 library(rgl)           # 3D point-cloud widget (interactive)
 library(scatterplot3d) # headless static 3D render (download + AI snapshot)
 
+# --- Spatial / Remote Sensing expansion (Phase 2) ---
+library(leaflet)
+library(leaflet.extras)  # draw toolbar (addDrawToolbar)
+library(leafem)          # addGeoRaster (terra rasters in leaflet)
+library(viridisLite)     # colour palettes for raster display
+library(httr)            # CDSE OAuth2 token exchange
+library(stars)           # stars rasters for ggplot2 / map export
+library(ggplot2)         # already loaded via factoextra; explicit for map export
+library(ggspatial)       # north arrow + scale bar in ggplot2 map layouts
+# rstac, exactextractr used via requireNamespace() guards in their respective modules
+# Install if needed:
+#   install.packages(c("leaflet","leaflet.extras","leafem","viridisLite",
+#                      "httr","stars","ggspatial","rstac","exactextractr"))
+
 # Shared stateless helpers + plotting engines.
 source("helpers.R")
 source("evaluation_function.R")  # uef_evaluation() for LiDAR model evaluation
@@ -58,4 +72,6 @@ source("mod_clustering.R")
 source("mod_classification.R")
 source("mod_da.R")
 source("mod_lidar.R")
+source("mod_raster.R")
+source("mod_rs_search.R")
 source("mod_chat.R")

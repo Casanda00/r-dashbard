@@ -4,6 +4,9 @@
 # legacy server. (AI/OpenAI helpers are intentionally NOT here yet.)
 # ==========================================================================
 
+# Null-coalescing: return a if non-null and non-empty, else b.
+`%||%` <- function(a, b) if (!is.null(a) && length(a) > 0) a else b
+
 # Render a plotting function to an off-screen PNG and return base64 (for AI vision).
 # Returns NULL if there is nothing to draw or the plot errors.
 capture_plot_as_base64 <- function(plot_fn) {

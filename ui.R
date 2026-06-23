@@ -161,7 +161,9 @@ ui <- page_fillable(
           list(value = "clustering",     label = "Clustering Analysis"),
           list(value = "classification", label = "Classification")
         )),
-        .topMenu("Spatial & LiDAR", list(
+        .topMenu("Spatial Analysis", list(
+          list(value = "rs_search",  label = "Satellite Search & Download"),
+          list(value = "raster",     label = "Raster Analysis"),
           list(value = "pointcloud", label = "Point Cloud & 3D Viewer"),
           list(value = "chm_itd",    label = "CHM & Individual Tree Detection"),
           list(value = "metrics",    label = "Metric Extraction & Evaluation")
@@ -199,6 +201,8 @@ ui <- page_fillable(
           .viewPanel("da", daCanvasUI("da")),
           .viewPanel("clustering", clusteringCanvasUI("clustering")),
           .viewPanel("classification", classificationCanvasUI("classification")),
+          .viewPanel("raster",     rasterCanvasUI("raster")),
+          .viewPanel("rs_search",  rsSearchCanvasUI("rs_search")),
           .viewPanel("pointcloud", lidarPointcloudCanvasUI("lidar")),
           .viewPanel("chm_itd", lidarChmCanvasUI("lidar")),
           .viewPanel("metrics", lidarMetricsCanvasUI("lidar"))
@@ -222,6 +226,8 @@ ui <- page_fillable(
           .viewPanel("da", daToolsUI("da")),
           .viewPanel("clustering", clusteringToolsUI("clustering")),
           .viewPanel("classification", classificationToolsUI("classification")),
+          .viewPanel("raster",     rasterToolsUI("raster")),
+          .viewPanel("rs_search",  rsSearchToolsUI("rs_search")),
           .viewPanel("pointcloud", lidarPointcloudToolsUI("lidar")),
           .viewPanel("chm_itd", lidarChmToolsUI("lidar")),
           .viewPanel("metrics", lidarMetricsToolsUI("lidar"))

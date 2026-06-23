@@ -33,6 +33,14 @@ lmeToolsUI <- function(id) {
         actionButton(ns("re_insert"), "Insert Random Effect", class = "btn-primary btn-sm", width = "100%")
     ),
     hr(),
+    div(
+      style = "background-color:#fff8e1; padding:10px; border-radius:5px; border:1px solid #ffe082;",
+      markdown("**Convergence Options**"),
+      checkboxInput(ns("auto_scale"), "Auto-scale numeric predictors (helps convergence)", value = FALSE),
+      tags$p(class = "small text-muted mb-0",
+        "Scaling centres and standardises predictors before fitting. Coefficients become SD units.")
+    ),
+    hr(),
     actionButton(ns("run"), "Fit LME Model", class = "btn-primary", width = "100%")
   )
 }
@@ -115,12 +123,30 @@ lmeServer <- function(id, dataset_pool, active_dataset) {
       fixed_form_str <- paste(input$y, "~", input$fixed_text)
       withProgress(message = 'Fitting LME Model...', value = 0.5, {
         tryCatch({
-          fixed_form <- as.formula(fixed_form_str)
+          # Optional: scale all numeric predictors to improve convergence.
+          df_fit  <- df
+          scaled  <- FALSE
+          if (isTRUE(input$auto_scale)) {
+            num_cols <- names(df_fit)[sapply(df_fit, is.numeric)]
+            # Don't scale the response variable itself.
+            num_cols <- setdiff(num_cols, input$y)
+            if (length(num_cols) > 0) {
+              df_fit[num_cols] <- lapply(df_fit[num_cols], scale)
+              scaled <- TRUE
+            }
+          }
+          fixed_form  <- as.formula(fixed_form_str)
           random_form <- as.formula(input$random_text)
-          fit <- nlme::lme(fixed = fixed_form, random = random_form, data = df, na.action = na.omit)
-          r2 <- tryCatch(MuMIn::r.squaredGLMM(fit), error = function(e) matrix(NA, ncol = 2, dimnames = list(NULL, c("R2m", "R2c"))))
-          model_obj(list(model = fit, data = df, target = input$y, r2 = r2))
-          showNotification("LME Model fitted successfully!", type = "message")
+          # Always use optim + generous iteration limit to avoid premature failures.
+          ctrl <- nlme::lmeControl(opt = "optim", msMaxIter = 1000)
+          fit  <- nlme::lme(fixed = fixed_form, random = random_form,
+                            data = df_fit, na.action = na.omit, control = ctrl)
+          r2 <- tryCatch(MuMIn::r.squaredGLMM(fit),
+                         error = function(e) matrix(NA, ncol = 2, dimnames = list(NULL, c("R2m", "R2c"))))
+          model_obj(list(model = fit, data = df_fit, target = input$y, r2 = r2, scaled = scaled))
+          msg <- if (scaled) "LME fitted (predictors were auto-scaled — coefficients in SD units)."
+                 else        "LME Model fitted successfully!"
+          showNotification(msg, type = "message")
         }, error = function(e) {
           showNotification(paste("Error fitting LME:", e$message), type = "error")
         })
@@ -136,6 +162,8 @@ lmeServer <- function(id, dataset_pool, active_dataset) {
     output$performance <- renderPrint({
       obj <- model_obj()
       if (is.null(obj)) return(cat("Awaiting model training..."))
+      if (isTRUE(obj$scaled))
+        cat("NOTE: Predictors were auto-scaled. Coefficients are in standard deviation units.\n\n")
       cat("=== Nakagawa R-squared (GLMM) ===\n")
       cat("Marginal R2 (Fixed effects only):  ", round(obj$r2[1, "R2m"], 4), "\n")
       cat("Conditional R2 (Fixed + Random):   ", round(obj$r2[1, "R2c"], 4), "\n\n")

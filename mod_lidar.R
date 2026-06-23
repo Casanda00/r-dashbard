@@ -48,7 +48,7 @@ lidarPointcloudCanvasUI <- function(id) {
       card_header(class = "d-flex justify-content-between align-items-center bg-light", "Static 3D Snapshot (download / AI view)",
                   downloadButton(ns("download_3d"), "Download Plot", class = "btn-sm btn-outline-success")),
       div(class = "d-flex align-items-center gap-2 px-2",
-          sliderInput(ns("snap_pts"), "Display points (decimated):", min = 10000, max = 200000, value = 60000, step = 10000, width = "320px")),
+          sliderInput(ns("snap_pts"), "Max display points (both 3D viewers):", min = 10000, max = 200000, value = 60000, step = 10000, width = "320px")),
       plotOutput(ns("static_3d"), height = "430px")
     ),
     layout_columns(
@@ -196,8 +196,19 @@ lidarServer <- function(id, dataset_pool) {
 
     output$lidar_3d_viewer <- renderRglwidget({
       req(rv_lidar$las)
+      las_full <- rv_lidar$las
+      n   <- nrow(las_full@data)
+      cap <- min(n, as.integer(input$snap_pts %||% 60000L))
+      # Decimate before rendering to prevent WebSocket OOM / server disconnect.
+      las_disp <- if (n > cap) {
+        idx <- sort(sample.int(n, cap))
+        las_full@data <- las_full@data[idx]
+        las_full
+      } else {
+        las_full
+      }
       rgl::clear3d()
-      lidR::plot(rv_lidar$las, color = "Z", bg = "white", size = 2, clear_artifacts = FALSE)
+      lidR::plot(las_disp, color = "Z", bg = "white", size = 2, clear_artifacts = FALSE)
       rgl::rglwidget()
     })
 
