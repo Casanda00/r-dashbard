@@ -1,253 +1,243 @@
-library(shiny)
-library(bslib)
-library(shinyWidgets)
+# ==========================================================================
+# ui.R  --  GeoLibre-inspired shell
+# --------------------------------------------------------------------------
+# One persistent frame (not separate full-screen tabs):
+#   - top menubar       : Data / Models / Machine Learning / Spatial & LiDAR
+#   - left Datasets rail : upload + clickable list, sets the active dataset
+#   - center canvas      : navset_hidden swapped by the menubar (current_view)
+#   - right tools panel  : navset_hidden swapped in lockstep with the canvas
+#   - bottom status bar  : active dataset + dimensions
+# The menubar sets input$current_view; server.R nav_selects both navsets.
+# ==========================================================================
 
-ui <- page_navbar(
-  # --- SOFTWARE TITLE & THEME ---
-  title = "TerraTrack: Forest Trafficability Engine",
-  id = "main_tabs",
-  theme = bs_theme(preset = "flatly"), # Applies a sleek, professional "software" look globally
-  
-  header = tags$head(
-    tags$style(HTML("
-      /* --- THE RESIZE VISUAL CUES --- */
-      .bslib-sidebar-layout > aside, 
-      .bslib-sidebar-layout > .sidebar {
-          border-right: 4px solid #dee2e6 !important; 
-          transition: border-color 0.2s ease;
-      }
-      .bslib-sidebar-layout > aside:hover, 
-      .bslib-sidebar-layout > .sidebar:hover {
-          border-right-color: #adb5bd !important; 
-      }
-      .bslib-sidebar-layout > aside.is-resizing, 
-      .bslib-sidebar-layout > .sidebar.is-resizing {
-          border-right-color: #0d6efd !important; 
-      }
-      
-      pre, code { white-space: pre !important; word-wrap: normal !important; overflow-x: visible !important; }
-      .formula-box pre { margin: 0; background-color: transparent; border: none; font-weight: bold; color: #2c3e50; }
-      .chat-user { background-color: #e9ecef; padding: 10px; border-radius: 12px 12px 0px 12px; margin-bottom: 10px; text-align: right; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-      .chat-ai { background-color: #d1ecf1; padding: 10px; border-radius: 12px 12px 12px 0px; margin-bottom: 10px; text-align: left; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-    ")),
-    
-    # --- BULLETPROOF JAVASCRIPT COORDINATE TRACKER ---
-    tags$script(HTML("
-      $(document).ready(function() {
-          let isResizing = false;
-          let currentAside = null;
-          let currentLayout = null;
-          const EDGE_TOLERANCE = 10; 
-
-          $(document).on('mousemove', function(e) {
-              if (isResizing && currentAside && currentLayout) {
-                  let newWidth = e.pageX - currentLayout.offset().left;
-                  
-                  if (newWidth < 200) newWidth = 200;
-                  if (newWidth > $(window).width() * 0.6) newWidth = $(window).width() * 0.6;
-
-                  currentLayout.css({
-                      '--bslib-sidebar-width': newWidth + 'px',
-                      '--_sidebar-width': newWidth + 'px'
-                  });
-                  return;
-              }
-
-              let $aside = $(e.target).closest('.bslib-sidebar-layout > aside, .bslib-sidebar-layout > .sidebar');
-              if ($aside.length) {
-                  let rightEdge = $aside.offset().left + $aside.outerWidth();
-                  if (Math.abs(e.pageX - rightEdge) <= EDGE_TOLERANCE) {
-                      $aside.css('cursor', 'col-resize');
-                  } else {
-                      $aside.css('cursor', '');
-                  }
-              }
-          });
-
-          $(document).on('mousedown', function(e) {
-              let $aside = $(e.target).closest('.bslib-sidebar-layout > aside, .bslib-sidebar-layout > .sidebar');
-              if ($aside.length) {
-                  let rightEdge = $aside.offset().left + $aside.outerWidth();
-                  if (Math.abs(e.pageX - rightEdge) <= EDGE_TOLERANCE) {
-                      isResizing = true;
-                      currentAside = $aside;
-                      currentLayout = $aside.closest('.bslib-sidebar-layout');
-                      
-                      currentAside.addClass('is-resizing');
-                      $('body').css({'cursor': 'col-resize', 'user-select': 'none'});
-                      e.preventDefault(); 
-                  }
-              }
-          });
-
-          $(document).on('mouseup', function(e) {
-              if (isResizing) {
-                  isResizing = false;
-                  if (currentAside) currentAside.removeClass('is-resizing');
-                  currentAside = null;
-                  currentLayout = null;
-                  $('body').css({'cursor': '', 'user-select': ''});
-              }
-          });
-      });
-    "))
-  ),
-  
-  # ---- STAGE 1: DATA IMPORT & ENGINEERING (ETL) ----
-  nav_panel(
-    title = "1. Data Engineering",
-    layout_sidebar(
-      sidebar = sidebar(
-        title = "Data Operations",
-        id = "sidebar_stage1",
-        width = 350, 
-        accordion(
-          id = "etl_accordion", open = "Step 1: Import Data",
-          accordion_panel("Step 1: Import Data", fileInput("user_files", "Upload Custom Datasets (.csv, .xlsx, .txt)", multiple = TRUE, accept = c(".csv", ".txt", ".xlsx", ".xls"))),
-          accordion_panel("Step 2: Subsetting", pickerInput("eng_subset_cols", "Columns to Keep:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE, selectedTextFormat = "count > 2")), actionButton("apply_subset", "Apply Subset", class="btn-primary", width = "100%"), br(), actionButton("reset_data", "Reset to Raw Data", class="btn-warning", width = "100%")),
-          accordion_panel("Step 3: Type Conversion", pickerInput("convert_to_num", "Force to Numeric:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE)), pickerInput("convert_to_cat", "Force to Categorical:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE)), actionButton("apply_conversion", "Apply Conversions", class="btn-info", width = "100%")),
-          accordion_panel("Step 4: Plot Aggregation", selectInput("group_id", "Plot ID Column (e.g., final_id):", choices = NULL), pickerInput("group_nums", "Numeric Columns to Average:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE, selectedTextFormat = "count > 2")), pickerInput("group_cats", "Categorical Columns to Keep:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE, selectedTextFormat = "count > 2")), actionButton("apply_group", "Aggregate Data", class="btn-primary", width = "100%")),
-          accordion_panel("Step 5: Batch Apply Pipeline", markdown("*Instantly apply active settings to other datasets.*"), pickerInput("batch_targets", "Select Datasets to Update:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE)), actionButton("apply_batch", "Batch Apply Settings", class="btn-danger", width = "100%")),
-          accordion_panel("Step 6: Level Management", navset_pill(nav_panel("Rename Levels", selectInput("rename_col", "Categorical Column:", choices = NULL), uiOutput("dynamic_rename_ui"), actionButton("apply_rename", "Apply Renames", class="btn-success", width = "100%")), nav_panel("Merge Levels", selectInput("agg_col", "Categorical Column:", choices = NULL), pickerInput("agg_levels", "Levels to Merge:", choices = NULL, multiple = TRUE, options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE)), textInput("agg_new_name", "New Combined Name:", placeholder = "e.g., Wetland"), actionButton("apply_merge", "Merge Levels", class="btn-success", width = "100%"))))
-        )
-      ),
-      
-      selectInput("eng_dataset", "Active Workspace Dataset:", choices = c("Awaiting Data Upload..." = ""), width = "350px"),
-      layout_columns(
-        col_widths = c(12),
-        card(card_header(class = "d-flex justify-content-between align-items-center bg-light", "Dataset Structure", downloadButton("download_data", "Download CSV", class = "btn-sm btn-outline-success")), div(style = "overflow-y: auto; height: 250px; padding: 5px;", verbatimTextOutput("eng_str"))),
-        card(card_header(class = "d-flex justify-content-between align-items-center bg-light", "Active Column Distributions", downloadButton("download_dist_plot", "Download Plot", class = "btn-sm btn-outline-success")), div(style = "padding: 5px;", selectInput("eng_view_col", "View Frequency/Summary of:", choices = NULL), layout_columns(col_widths = c(6, 6), plotOutput("eng_plot", height = "350px"), div(style = "overflow-y: auto; height: 350px;", verbatimTextOutput("eng_table")))))
-      )
-    )
-  ),
-  
-  # ---- STAGE 2: EXPLORATORY DATA ANALYSIS (EDA) ----
-  nav_panel(
-    title = "2. Exploratory Analysis",
-    layout_sidebar(
-      sidebar = sidebar(
-        title = "EDA Control Panel",
-        id = "sidebar_stage2",
-        width = 350, 
-        markdown("**Select Variables to Explore:**"),
-        selectInput("eda_num1", "Numeric Y-Axis (e.g., Height):", choices = NULL),
-        selectInput("eda_num2", "Numeric X-Axis (e.g., Diameter):", choices = NULL),
-        selectInput("eda_category", "Grouping Category (Color):", choices = NULL),
-        hr(),
-        uiOutput("eda_plot_selector_ui") 
-      ),
-      
-      selectInput("eda_dataset", "Active Dataset:", choices = c("Awaiting Data Upload..." = ""), width = "350px"),
-      card(
-        card_header(class = "d-flex justify-content-between align-items-center bg-light", "Dynamic Relationship Visualizations", div(class = "d-flex align-items-center gap-2 header-controls", radioGroupButtons("eda_view_mode", label = NULL, choices = c("Grid View", "Single Plot"), selected = "Grid View", size = "sm", status = "primary"), uiOutput("eda_single_selector"), downloadButton("download_eda_plot", "Download Plot", class = "btn-sm btn-outline-success"))),
-        div(style = "padding: 5px; overflow-x: hidden; overflow-y: auto;", uiOutput("dynamic_eda_plot_ui"))
-      )
-    )
-  ),
-  
-  # ---- STAGE 3: LINEAR REGRESSION (LM) ----
-  nav_panel(
-    title = "3. Linear Regression",
-    layout_sidebar(
-      sidebar = sidebar(
-        title = "Model Parameters",
-        id = "sidebar_stage3",
-        width = 350, 
-        selectInput("lm_y", "Dependent Variable (Y):", choices = NULL),
-        hr(),
-        markdown("**Formula Editor**\n*Type freely or use the builder buttons below.*"),
-        textAreaInput("lm_formula_text", "Predictors (X):", value = "", rows = 3, placeholder = "e.g., ih5_dm + Soiltype2 * Texture"),
-        div(style = "background-color: #f8f9fa; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6;",
-            markdown("**Quick Builder**"),
-            selectInput("lm_build_var", "Select Variable:", choices = NULL),
-            selectInput("lm_build_trans", "Apply Transformation:", choices = c("None (Raw)" = "raw", "Logarithm (log)" = "log", "Square Root (sqrt)" = "sqrt", "Quadratic (^2)" = "poly")),
-            fluidRow(column(6, actionButton("lm_btn_add_var", "Insert", class="btn-primary btn-sm", width="100%", style="margin-bottom:5px;")), column(3, actionButton("lm_btn_add_plus", " + ", class="btn-secondary btn-sm", width="100%", style="margin-bottom:5px;")), column(3, actionButton("lm_btn_add_star", " * ", class="btn-secondary btn-sm", width="100%", style="margin-bottom:5px;"))),
-            actionButton("lm_btn_clear", "Clear Formula", class="btn-outline-danger btn-sm", width="100%")
-        ),
-        hr(),
-        pickerInput("lm_selected_plots", "Select Diagnostics to View:", choices = c("Fitted vs Actual", "Residual Plot", "Target Distribution"), selected = c("Fitted vs Actual", "Residual Plot", "Target Distribution"), multiple = TRUE, options = pickerOptions(actionsBox = TRUE))
-      ),
-      
-      selectInput("lm_dataset", "Active Dataset:", choices = c("Awaiting Data Upload..." = ""), width = "350px"),
-      layout_columns(
-        col_widths = c(12),
-        card(card_header(class="bg-light", "Model Summary"), div(class = "formula-box", style = "padding: 10px; background-color: #e9ecef; border-bottom: 1px solid #dee2e6;", verbatimTextOutput("lm_formula_display")), div(style = "overflow-y: auto; height: 350px; padding: 5px;", verbatimTextOutput("lm_summary"))),
-        card(card_header(class = "d-flex justify-content-between align-items-center bg-light", "Model Diagnostics", div(class = "d-flex align-items-center gap-2 header-controls", radioGroupButtons("lm_view_mode", label = NULL, choices = c("Grid View", "Single Plot"), selected = "Grid View", size = "sm", status = "primary"), uiOutput("lm_single_selector"), downloadButton("download_lm_plot", "Download Plot", class = "btn-sm btn-outline-success"))), div(style = "padding: 5px; overflow-x: hidden; overflow-y: auto;", uiOutput("dynamic_lm_plot_ui")))
-      )
-    )
-  ),
-  
-  # ---- STAGE 4: ANOVA ----
-  nav_panel(
-    title = "4. ANOVA",
-    layout_sidebar(
-      sidebar = sidebar(
-        title = "ANOVA Parameters",
-        id = "sidebar_stage4",
-        width = 350, 
-        markdown("*Tests continuous differences across categorical groups.*"),
-        selectInput("aov_y", "Continuous Target (Y):", choices = NULL),
-        selectInput("aov_x", "Categorical Group (X):", choices = NULL),
-        hr(),
-        pickerInput("aov_selected_plots", "Select Diagnostics to View:", choices = c("Residuals vs Fitted", "Normal Q-Q"), selected = c("Residuals vs Fitted", "Normal Q-Q"), multiple = TRUE, options = pickerOptions(actionsBox = TRUE))
-      ),
-      
-      selectInput("aov_dataset", "Active Dataset:", choices = c("Awaiting Data Upload..." = ""), width = "350px"),
-      layout_columns(
-        col_widths = c(12),
-        navset_card_tab(title = "Statistical Results", nav_panel("ANOVA Table", div(style = "overflow-y: auto; height: 300px; padding: 5px;", verbatimTextOutput("aov_summary"))), nav_panel("Tukey HSD (Post-Hoc)", div(style = "overflow-y: auto; height: 300px; padding: 5px;", verbatimTextOutput("aov_tukey")))),
-        card(card_header(class = "d-flex justify-content-between align-items-center bg-light", "Diagnostics", div(class = "d-flex align-items-center gap-2 header-controls", radioGroupButtons("aov_view_mode", label = NULL, choices = c("Grid View", "Single Plot"), selected = "Grid View", size = "sm", status = "primary"), uiOutput("aov_single_selector"), downloadButton("download_aov_plot", "Download Plot", class = "btn-sm btn-outline-success"))), div(style = "padding: 5px; overflow-x: hidden; overflow-y: auto;", uiOutput("dynamic_aov_plot_ui")))
-      )
-    )
-  ),
-  
-  # ---- STAGE 5: LOGISTIC REGRESSION (MULTINOMIAL) ----
-  nav_panel(
-    title = "5. Logistic Regression",
-    layout_sidebar(
-      sidebar = sidebar(
-        title = "Classification Setup",
-        id = "sidebar_stage5",
-        width = 350, 
-        selectInput("log_y", "Categorical Target (Y):", choices = NULL), hr(), markdown("**Formula Editor**\n*Type freely or use the builder buttons below.*"), textAreaInput("log_formula_text", "Predictors (X):", value = "", rows = 3, placeholder = "e.g., ih5_dm + Organic_depth"), div(style = "background-color: #f8f9fa; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6;", markdown("**Quick Builder**"), selectInput("log_build_var", "Select Variable:", choices = NULL), selectInput("log_build_trans", "Apply Transformation:", choices = c("None (Raw)" = "raw", "Logarithm (log)" = "log", "Square Root (sqrt)" = "sqrt", "Quadratic (^2)" = "poly")), fluidRow(column(6, actionButton("log_btn_add_var", "Insert", class="btn-primary btn-sm", width="100%", style="margin-bottom:5px;")), column(3, actionButton("log_btn_add_plus", " + ", class="btn-secondary btn-sm", width="100%", style="margin-bottom:5px;")), column(3, actionButton("log_btn_add_star", " * ", class="btn-secondary btn-sm", width="100%", style="margin-bottom:5px;"))), actionButton("log_btn_clear", "Clear Formula", class="btn-outline-danger btn-sm", width="100%"))
-      ),
-      selectInput("log_dataset", "Active Dataset:", choices = c("Awaiting Data Upload..." = ""), width = "350px"),
-      layout_columns(
-        col_widths = c(6, 6), 
-        card(card_header(class="bg-light", "Model Summary"), div(class = "formula-box", style = "padding: 10px; background-color: #e9ecef; border-bottom: 1px solid #dee2e6;", verbatimTextOutput("log_formula_display")), div(style = "overflow-y: auto; height: 350px; padding: 5px;", verbatimTextOutput("log_summary"))), 
-        card(card_header(class="bg-light", "Model Evaluation"), div(style = "overflow-y: auto; height: 400px; padding: 5px;", uiOutput("dynamic_log_plot_ui"), h5("Confusion Matrix", class="text-muted"), verbatimTextOutput("log_matrix"), hr(), tags$b(textOutput("log_accuracy")))))
-    )
-  ),
-  
-  # =========================================================
-  # AI CO-PILOT SIDEBAR PANEL
-  # =========================================================
-  tags$div(
-    style = "position: fixed; top: 0; right: 0; height: 100vh; z-index: 9999; display: flex; flex-direction: row; align-items: flex-end; pointer-events: none;",
-    
-    div(
-      style = "position: absolute; bottom: 20px; right: 20px; z-index: 10000; pointer-events: auto;",
-      actionButton("toggle_chat", "Ask Co-Pilot", icon = icon("robot"), class = "btn-primary btn-lg", style = "border-radius: 50px; box-shadow: 0px 4px 15px rgba(0,0,0,0.2); font-weight: bold; letter-spacing: 0.5px;")
-    ),
-    
-    conditionalPanel(
-      condition = "input.toggle_chat % 2 == 1",
-      card(
-        style = "width: 400px; height: 100vh; margin: 0; border-radius: 0; border-left: 1px solid #dee2e6; box-shadow: -5px 0px 25px rgba(0,0,0,0.15); pointer-events: auto;",
-        card_header(
-          class = "bg-primary text-white d-flex justify-content-between align-items-center", 
-          tags$strong(icon("robot"), " AI Co-Pilot"),
-          tags$span(style = "font-size: 11px; opacity: 0.8;", "Context: Auto-Synced")
-        ),
-        div(id = "chat_history_container", style = "flex-grow: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column;", uiOutput("chat_history")),
-        div(style = "padding: 15px; border-top: 1px solid #dee2e6; background: #f8f9fa;", 
-            fluidRow(
-              column(10, style = "padding-right: 5px;", textInput("chat_input", label = NULL, placeholder = "Ask about this model...", width = "100%")), 
-              # ICON-ONLY SEND BUTTON FIX
-              column(2, style = "padding-left: 0;", actionButton("send_chat", label = icon("paper-plane"), class = "btn-primary", width = "100%", style="padding: 6px 12px;"))
-            )
-        )
-      )
+# A top-menubar dropdown whose items set input$current_view on click.
+.topMenu <- function(label, items) {
+  tags$li(class = "nav-item dropdown",
+    tags$a(class = "nav-link dropdown-toggle app-menu", href = "#", `data-bs-toggle` = "dropdown", role = "button", label),
+    tags$ul(class = "dropdown-menu",
+      lapply(items, function(it) {
+        tags$li(tags$a(class = "dropdown-item", href = "#",
+          onclick = sprintf("Shiny.setInputValue('current_view','%s',{priority:'event'});return false;", it[["value"]]),
+          it[["label"]]))
+      })
     )
   )
+}
+
+# A single (non-dropdown) menubar button.
+.topItem <- function(label, value) {
+  tags$li(class = "nav-item",
+    tags$a(class = "nav-link app-menu", href = "#",
+      onclick = sprintf("Shiny.setInputValue('current_view','%s',{priority:'event'});return false;", value),
+      label))
+}
+
+# A hidden, switchable panel (one per view) used in both navsets.
+.viewPanel <- function(value, ...) nav_panel(title = value, value = value, ...)
+
+# Placeholder content for views not yet ported back.
+.todo <- function(name) div(class = "p-5 text-center text-muted", h5(name), p("Coming back next — being ported into the new shell."))
+
+ui <- page_fillable(
+  theme = app_theme,
+  padding = 0,
+  gap = 0,
+
+  tags$head(
+    tags$style(HTML("
+    html, body { height: 100%; }
+    .app-shell { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+
+    /* --- Top menubar --- */
+    .app-topbar { background: #2e7d32; color: #fff; display: flex; align-items: center; gap: 6px; padding: 2px 12px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+    .app-topbar .brand { font-weight: 700; letter-spacing: .3px; margin-right: 10px; white-space: nowrap; }
+    .app-topbar .navbar-nav, .app-topbar ul.nav { display: flex; flex-direction: row; margin: 0; padding: 0; list-style: none; }
+    .app-topbar .nav-link.app-menu { color: #eafaef !important; padding: 4px 10px; font-size: 14px; cursor: pointer; }
+    .app-topbar .nav-link.app-menu:hover { color: #fff !important; background: rgba(255,255,255,.12); border-radius: 4px; }
+    .app-topbar .dropdown-item.active, .app-topbar .dropdown-item:active { background: #2e7d32; }
+
+    /* --- Body: [left] [div] [canvas] [div] [right] -- resizable via CSS vars --- */
+    .app-main { display: grid; --left-w: 240px; --right-w: 350px;
+                grid-template-columns: var(--left-w) 5px minmax(0,1fr) 5px var(--right-w);
+                min-height: 0; transition: grid-template-columns .12s ease; }
+    .app-main.left-collapsed  { --left-w: 36px; }
+    .app-main.right-collapsed { --right-w: 36px; }
+    .app-left, .app-right { background: #f8faf8; overflow-y: auto; padding: 10px; position: relative; }
+    .app-left  { border-right: 1px solid #dee2e6; }
+    .app-right { border-left: 1px solid #dee2e6; }
+    .app-center{ overflow: auto; padding: 10px; min-width: 0; }
+    .app-left h6 { text-transform: uppercase; font-size: 11px; letter-spacing: .6px; color: #6c757d; }
+    .app-main.left-collapsed .app-left .rail-body, .app-main.right-collapsed .app-right .rail-body { display: none; }
+    .app-main.left-collapsed .app-left, .app-main.right-collapsed .app-right { padding: 8px 2px; overflow: hidden; }
+
+    /* --- Resize dividers --- */
+    .app-divider { cursor: col-resize; background: transparent; transition: background .1s; }
+    .app-divider:hover, .app-divider.dragging { background: #4caf50; }
+    .app-main.left-collapsed .app-divider.left, .app-main.right-collapsed .app-divider.right { pointer-events: none; }
+
+    /* --- Collapse toggles (dock to icon strip) --- */
+    .rail-toggle { border: none; background: transparent; color: #6c757d; cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1.4; }
+    .rail-toggle:hover { color: #2e7d32; }
+    .app-left  .rail-toggle { float: right; }
+    .app-right .rail-toggle { float: left; }
+    .rail-toggle .chev { display: inline-block; transition: transform .12s; }
+    .app-main.left-collapsed  .app-left  .rail-toggle .chev,
+    .app-main.right-collapsed .app-right .rail-toggle .chev { transform: rotate(180deg); }
+
+    /* --- Datasets list --- */
+    .ds-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .ds-item:hover { background: #e8f5e9; }
+    .ds-item.active { background: #2e7d32; color: #fff; }
+    .ds-item .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; flex: 0 0 auto; }
+    .ds-item.active .dot { background: #fff; }
+
+    /* --- Status bar --- */
+    .app-status { background: #eef3ee; border-top: 1px solid #dee2e6; font-size: 12px; color: #495057; display: flex; align-items: center; gap: 18px; padding: 3px 14px; }
+    .app-status .sep { color: #adb5bd; }
+    ")),
+    tags$script(HTML("
+      function toggleRail(side){
+        var m = document.querySelector('.app-main');
+        var cls = side==='left' ? 'left-collapsed' : 'right-collapsed';
+        var v   = side==='left' ? '--left-w' : '--right-w';
+        var def = side==='left' ? '240px' : '350px';
+        if(m.classList.contains(cls)){
+          m.classList.remove(cls);
+          m.style.setProperty(v, m.dataset[side] || def);
+        } else {
+          m.dataset[side] = m.style.getPropertyValue(v) || def;
+          m.classList.add(cls);
+          m.style.setProperty(v, '36px');
+        }
+      }
+      (function(){
+        var dragging=null, startX=0, startW=0;
+        document.addEventListener('mousedown', function(e){
+          var d = e.target.closest('.app-divider'); if(!d) return;
+          var m = document.querySelector('.app-main');
+          dragging = d.classList.contains('left') ? 'left' : 'right';
+          if(m.classList.contains(dragging+'-collapsed')){ dragging=null; return; }
+          startX = e.clientX;
+          var cur = m.style.getPropertyValue(dragging==='left'?'--left-w':'--right-w');
+          startW = parseInt(cur) || (dragging==='left'?240:350);
+          d.classList.add('dragging');
+          document.body.style.userSelect='none'; document.body.style.cursor='col-resize';
+          e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e){
+          if(!dragging) return;
+          var m = document.querySelector('.app-main');
+          var dx = e.clientX - startX;
+          var w = dragging==='left' ? startW+dx : startW-dx;
+          w = Math.max(140, Math.min(window.innerWidth*0.5, w));
+          m.style.setProperty(dragging==='left'?'--left-w':'--right-w', w+'px');
+        });
+        document.addEventListener('mouseup', function(){
+          if(!dragging) return; dragging=null;
+          document.querySelectorAll('.app-divider').forEach(function(d){ d.classList.remove('dragging'); });
+          document.body.style.userSelect=''; document.body.style.cursor='';
+          if(window.Shiny) window.dispatchEvent(new Event('resize'));
+        });
+      })();
+    "))
+  ),
+
+  tags$div(class = "app-shell",
+
+    # ---------- TOP MENUBAR ----------
+    tags$div(class = "app-topbar",
+      tags$span(class = "brand", "TerraTrack"),
+      tags$ul(class = "nav",
+        .topItem("Data", "data"),
+        .topMenu("Models", list(
+          list(value = "lm",       label = "Linear Regression"),
+          list(value = "lme",      label = "Linear Mixed Effects (LME)"),
+          list(value = "anova",    label = "ANOVA"),
+          list(value = "logistic", label = "Logistic Regression")
+        )),
+        .topMenu("Machine Learning", list(
+          list(value = "rf",             label = "Random Forest"),
+          list(value = "da",             label = "Discriminant Analysis"),
+          list(value = "clustering",     label = "Clustering Analysis"),
+          list(value = "classification", label = "Classification")
+        )),
+        .topMenu("Spatial & LiDAR", list(
+          list(value = "pointcloud", label = "Point Cloud & 3D Viewer"),
+          list(value = "chm_itd",    label = "CHM & Individual Tree Detection"),
+          list(value = "metrics",    label = "Metric Extraction & Evaluation")
+        ))
+      )
+    ),
+
+    # ---------- BODY ----------
+    tags$div(class = "app-main",
+
+      # Left: Datasets rail (global upload + active-dataset list)
+      tags$div(class = "app-left",
+        tags$button(class = "rail-toggle", onclick = "toggleRail('left')", title = "Collapse / expand", HTML('<span class="chev">&#9664;</span>')),
+        tags$div(class = "rail-body",
+          tags$h6("Datasets"),
+          fileInput("upload_files", NULL, multiple = TRUE, accept = c(".csv", ".txt", ".xlsx", ".xls"), buttonLabel = "Add Data", placeholder = "no file"),
+          uiOutput("datasets_list"),
+          tags$hr(),
+          actionButton("view_data", "View Data Table", class = "btn-sm btn-outline-success w-100", icon = icon("table"))
+        )
+      ),
+
+      # Drag handle between left rail and canvas
+      tags$div(class = "app-divider left"),
+
+      # Center: canvas, swapped by current_view
+      tags$div(class = "app-center",
+        navset_hidden(id = "canvas_view",
+          .viewPanel("data", dataCanvasUI("data")),
+          .viewPanel("lm", lmCanvasUI("lm")),
+          .viewPanel("lme", lmeCanvasUI("lme")),
+          .viewPanel("anova", anovaCanvasUI("anova")),
+          .viewPanel("logistic", logisticCanvasUI("logistic")),
+          .viewPanel("rf", rfCanvasUI("rf")),
+          .viewPanel("da", daCanvasUI("da")),
+          .viewPanel("clustering", clusteringCanvasUI("clustering")),
+          .viewPanel("classification", classificationCanvasUI("classification")),
+          .viewPanel("pointcloud", lidarPointcloudCanvasUI("lidar")),
+          .viewPanel("chm_itd", lidarChmCanvasUI("lidar")),
+          .viewPanel("metrics", lidarMetricsCanvasUI("lidar"))
+        )
+      ),
+
+      # Drag handle between canvas and right tools
+      tags$div(class = "app-divider right"),
+
+      # Right: contextual tools/params, swapped in lockstep with the canvas
+      tags$div(class = "app-right",
+        tags$button(class = "rail-toggle", onclick = "toggleRail('right')", title = "Collapse / expand", HTML('<span class="chev">&#9654;</span>')),
+        tags$div(class = "rail-body",
+        navset_hidden(id = "tools_view",
+          .viewPanel("data", tags$div(tags$h6(class = "text-uppercase text-muted small", "Processing Toolbox"), dataToolsUI("data"))),
+          .viewPanel("lm", lmToolsUI("lm")),
+          .viewPanel("lme", lmeToolsUI("lme")),
+          .viewPanel("anova", anovaToolsUI("anova")),
+          .viewPanel("logistic", logisticToolsUI("logistic")),
+          .viewPanel("rf", rfToolsUI("rf")),
+          .viewPanel("da", daToolsUI("da")),
+          .viewPanel("clustering", clusteringToolsUI("clustering")),
+          .viewPanel("classification", classificationToolsUI("classification")),
+          .viewPanel("pointcloud", lidarPointcloudToolsUI("lidar")),
+          .viewPanel("chm_itd", lidarChmToolsUI("lidar")),
+          .viewPanel("metrics", lidarMetricsToolsUI("lidar"))
+        )
+        )
+      )
+    ),
+
+    # ---------- STATUS BAR ----------
+    tags$div(class = "app-status",
+      tags$span("Active: "), tags$strong(textOutput("status_active", inline = TRUE)),
+      tags$span(class = "sep", "|"),
+      textOutput("status_dims", inline = TRUE)
+    )
+  ),
+
+  # ---------- AI CO-PILOT (floating, app-level) ----------
+  chatUI("chat")
 )

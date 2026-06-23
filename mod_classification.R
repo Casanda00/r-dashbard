@@ -1,0 +1,233 @@
+# ==========================================================================
+# MODULE: Classification (one-vs-all logistic)  (canvas + tools contract)
+# classificationToolsUI / classificationCanvasUI / classificationServer(...)
+# Per-class binary glm; F1 / precision / recall; button-triggered.
+# ==========================================================================
+
+classificationToolsUI <- function(id) {
+  ns <- NS(id)
+  tagList(
+    tags$h6(class = "text-uppercase text-muted small", "Classification Setup"),
+    div(class = "small text-muted mb-2",
+        "Method: one-vs-all binary logistic regression. For each class a separate ",
+        tags$code("glm(family = binomial)"), " is fit (that class vs the rest); predictions ",
+        "use the decision threshold below, and per-class Accuracy / Precision / Recall / F1 are reported. ",
+        tags$em("Differs from the Logistic Regression screen, which fits one multinomial model.")),
+    markdown("**1. Target & Predictors**"),
+    selectInput(ns("target"), "Target Variable (Categorical):", choices = NULL),
+    hr(),
+    markdown("**Formula Editor**\n*Type freely or use the builder buttons below.*"),
+    textAreaInput(ns("formula_text"), "Predictors (X):", value = "", rows = 3, placeholder = "e.g., ih5_dm + Nutrient_class"),
+    div(style = "background-color: #f8f9fa; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6;",
+        markdown("**Quick Builder**"),
+        selectInput(ns("build_var"), "Select Variable:", choices = NULL),
+        selectInput(ns("build_trans"), "Apply Transformation:", choices = c("None (Raw)" = "raw", "Logarithm (log)" = "log", "Square Root (sqrt)" = "sqrt", "Quadratic (^2)" = "poly")),
+        fluidRow(
+          column(6, actionButton(ns("btn_add_var"), "Insert", class = "btn-primary btn-sm", width = "100%", style = "margin-bottom:5px;")),
+          column(3, actionButton(ns("btn_add_plus"), " + ", class = "btn-secondary btn-sm", width = "100%", style = "margin-bottom:5px;")),
+          column(3, actionButton(ns("btn_add_star"), " * ", class = "btn-secondary btn-sm", width = "100%", style = "margin-bottom:5px;"))
+        ),
+        actionButton(ns("btn_clear"), "Clear Formula", class = "btn-outline-danger btn-sm", width = "100%")
+    ),
+    hr(),
+    markdown("**2. Classification Settings**"),
+    sliderInput(ns("threshold"), "Decision Threshold:", min = 0.1, max = 0.9, value = 0.5, step = 0.05),
+    hr(),
+    markdown("**3. Exclude Classes (Optional)**"),
+    pickerInput(ns("exclude_classes"), "Classes to Exclude:", choices = NULL, multiple = TRUE,
+                options = list(`actions-box` = TRUE, `live-search` = TRUE, `none-selected-text` = "None excluded")),
+    hr(),
+    actionButton(ns("run"), "Run Classification", class = "btn-primary", width = "100%", icon = icon("play"))
+  )
+}
+
+classificationCanvasUI <- function(id) {
+  ns <- NS(id)
+  div(
+    card(
+      card_header(class = "d-flex justify-content-between align-items-center bg-light", "Classification Performance (F1 Score by Class)",
+                  downloadButton(ns("download_plot"), "Download Plot", class = "btn-sm btn-outline-success")),
+      div(style = "height: 450px; padding: 10px;", plotOutput(ns("f1_plot"), height = "430px"))
+    ),
+    layout_columns(
+      col_widths = c(6, 6),
+      card(
+        card_header(class = "bg-light", "Per-Class Metrics"),
+        div(class = "formula-box", style = "padding: 10px; background-color: #e9ecef; border-bottom: 1px solid #dee2e6;", textOutput(ns("formula_display"))),
+        div(style = "overflow-y: auto; height: 300px; padding: 5px;", verbatimTextOutput(ns("metrics_table")))
+      ),
+      card(
+        card_header(class = "bg-light", "Per-Class Confusion Matrices"),
+        div(style = "overflow-y: auto; height: 345px; padding: 5px;", verbatimTextOutput(ns("confusion_details")))
+      )
+    )
+  )
+}
+
+classificationServer <- function(id, dataset_pool, active_dataset) {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+
+    active_data <- reactive({
+      ds <- active_dataset()
+      if (is.null(ds)) return(NULL)
+      dataset_pool[[ds]]
+    })
+
+    observe({
+      df <- active_data()
+      req(df)
+      cat_cols <- names(df)[sapply(df, is_safe_cat)]
+      all_cols <- names(df)
+      curr_y <- if (isTruthy(isolate(input$target)) && isolate(input$target) %in% cat_cols) isolate(input$target) else if (length(cat_cols) > 0) cat_cols[1] else NULL
+      curr_build <- if (isTruthy(isolate(input$build_var)) && isolate(input$build_var) %in% all_cols) isolate(input$build_var) else all_cols[1]
+      updateSelectInput(session, "target", choices = cat_cols, selected = curr_y)
+      updateSelectInput(session, "build_var", choices = all_cols, selected = curr_build)
+    })
+
+    observeEvent(input$target, {
+      df <- active_data(); req(df, input$target)
+      if (input$target %in% names(df)) {
+        classes <- unique(as.character(na.omit(df[[input$target]])))
+        updatePickerInput(session, "exclude_classes", choices = classes, selected = character(0))
+      }
+    })
+
+    observeEvent(input$btn_add_var, {
+      var <- paste0("`", input$build_var, "`")
+      term <- switch(input$build_trans, "raw" = var, "log" = paste0("log(", var, ")"), "sqrt" = paste0("sqrt(", var, ")"), "poly" = paste0("I(", var, "^2)"))
+      current <- trimws(input$formula_text)
+      updateTextAreaInput(session, "formula_text", value = if (nchar(current) > 0) paste(current, term) else term)
+    })
+    observeEvent(input$btn_add_plus, { current <- trimws(input$formula_text); if (nchar(current) > 0) updateTextAreaInput(session, "formula_text", value = paste(current, "+ ")) })
+    observeEvent(input$btn_add_star, { current <- trimws(input$formula_text); if (nchar(current) > 0) updateTextAreaInput(session, "formula_text", value = paste(current, "* ")) })
+    observeEvent(input$btn_clear, { updateTextAreaInput(session, "formula_text", value = "") })
+
+    formula_str <- reactive({
+      x_side <- trimws(input$formula_text)
+      if (nchar(x_side) == 0) return("target ~ ...")
+      paste("target ~", x_side)
+    })
+
+    output$formula_display <- renderText({
+      if (!isTruthy(input$target)) return("Awaiting target variable...")
+      x_side <- trimws(input$formula_text)
+      if (nchar(x_side) == 0) return(paste(input$target, "~ ..."))
+      paste(input$target, "~", x_side)
+    })
+
+    clf_results <- reactiveVal(NULL)
+    clf_confusion <- reactiveVal(NULL)
+
+    observeEvent(input$run, {
+      df <- active_data()
+      if (is.null(df)) { showNotification("Please upload a dataset first.", type = "warning"); return() }
+      req(input$target)
+      form_str_template <- formula_str()
+      if (grepl("\\.\\.\\.", form_str_template)) { showNotification("Please build a formula with predictor variables first.", type = "warning"); return() }
+
+      threshold <- input$threshold
+      exclude <- input$exclude_classes
+      data_filtered <- df
+      if (length(exclude) > 0) {
+        data_filtered <- data_filtered[!data_filtered[[input$target]] %in% exclude, , drop = FALSE]
+        data_filtered[[input$target]] <- droplevels(as.factor(data_filtered[[input$target]]))
+      }
+      classes <- unique(as.character(na.omit(data_filtered[[input$target]])))
+      if (length(classes) < 2) { showNotification("Need at least 2 classes after exclusions.", type = "error"); return() }
+
+      all_pred_vars <- tryCatch(all.vars(as.formula(form_str_template))[-1], error = function(e) { showNotification(paste("Formula error:", e$message), type = "error"); NULL })
+      if (is.null(all_pred_vars)) return()
+      needed_cols <- c(input$target, all_pred_vars)
+      missing <- setdiff(needed_cols, names(data_filtered))
+      if (length(missing) > 0) { showNotification(paste("Variables not found:", paste(missing, collapse = ", ")), type = "error"); return() }
+
+      clean_df <- data_filtered[, needed_cols, drop = FALSE]
+      clean_df <- clean_df[complete.cases(clean_df), , drop = FALSE]
+      if (nrow(clean_df) < 10) { showNotification("Insufficient complete cases (< 10).", type = "error"); return() }
+
+      withProgress(message = 'Running Classification...', value = 0, {
+        results_list <- list(); confusion_list <- list(); n_classes <- length(classes)
+        for (i in seq_along(classes)) {
+          cl <- classes[i]
+          incProgress(1 / n_classes, detail = paste("Processing class:", cl))
+          tryCatch({
+            clean_df$target <- ifelse(as.character(clean_df[[input$target]]) == cl, 1, 0)
+            model <- glm(as.formula(form_str_template), data = clean_df, family = binomial)
+            probs <- predict(model, type = "response")
+            preds <- ifelse(probs > threshold, 1, 0)
+            TP <- sum(preds == 1 & clean_df$target == 1); TN <- sum(preds == 0 & clean_df$target == 0)
+            FP <- sum(preds == 1 & clean_df$target == 0); FN <- sum(preds == 0 & clean_df$target == 1)
+            accuracy <- (TP + TN) / (TP + TN + FP + FN)
+            precision <- ifelse((TP + FP) == 0, NA, TP / (TP + FP))
+            recall <- ifelse((TP + FN) == 0, NA, TP / (TP + FN))
+            f1 <- ifelse(is.na(precision) | is.na(recall) | (precision + recall) == 0, NA, 2 * (precision * recall) / (precision + recall))
+            results_list[[cl]] <- data.frame(Class = cl, N = sum(clean_df$target == 1), Accuracy = round(accuracy, 4), Precision = round(precision, 4), Recall = round(recall, 4), F1 = round(f1, 4), stringsAsFactors = FALSE)
+            confusion_list[[cl]] <- data.frame(Class = cl, TP = TP, TN = TN, FP = FP, FN = FN, stringsAsFactors = FALSE)
+          }, error = function(e) {
+            results_list[[cl]] <<- data.frame(Class = cl, N = NA, Accuracy = NA, Precision = NA, Recall = NA, F1 = NA, stringsAsFactors = FALSE)
+            confusion_list[[cl]] <<- data.frame(Class = cl, TP = NA, TN = NA, FP = NA, FN = NA, stringsAsFactors = FALSE)
+          })
+        }
+        clf_results(do.call(rbind, results_list))
+        clf_confusion(do.call(rbind, confusion_list))
+      })
+      showNotification(paste("Classification complete!", length(classes), "classes evaluated."), type = "message")
+    })
+
+    f1_plot_fn <- function() {
+      res <- clf_results()
+      if (is.null(res)) { show_placeholder("Click 'Run Classification' to begin analysis."); return() }
+      print(ggplot(res, aes(x = reorder(Class, -F1), y = F1)) +
+              geom_bar(stat = "identity", fill = "steelblue", width = 0.7) +
+              geom_text(aes(label = ifelse(is.na(F1), "NA", sprintf("%.3f", F1))), vjust = -0.5, size = 4, fontface = "bold") +
+              ylim(0, min(1.15, max(res$F1, na.rm = TRUE) * 1.2)) + theme_minimal(base_size = 14) +
+              labs(title = "One-vs-All Classification: F1 Score by Class", x = "Class", y = "F1 Score") +
+              theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)))
+    }
+
+    output$f1_plot <- renderPlot({ f1_plot_fn() })
+
+    output$metrics_table <- renderPrint({
+      res <- clf_results()
+      if (is.null(res)) return(cat("Awaiting classification results...\nBuild a formula and click 'Run Classification'."))
+      cat("=== One-vs-All Classification Metrics ===\n")
+      cat("Threshold:", isolate(input$threshold), "\n\n")
+      print(res, row.names = FALSE)
+    })
+
+    output$confusion_details <- renderPrint({
+      conf <- clf_confusion()
+      if (is.null(conf)) return(cat("Awaiting classification results..."))
+      cat("=== Confusion Matrix Components (Per Class) ===\n\n")
+      for (i in 1:nrow(conf)) {
+        cat("--- Class:", conf$Class[i], "---\n")
+        cat("  True Positives  (TP):", conf$TP[i], "\n")
+        cat("  True Negatives  (TN):", conf$TN[i], "\n")
+        cat("  False Positives (FP):", conf$FP[i], "\n")
+        cat("  False Negatives (FN):", conf$FN[i], "\n\n")
+      }
+    })
+
+    output$download_plot <- downloadHandler(
+      filename = function() { paste0("classification_f1_", Sys.Date(), ".png") },
+      content = function(file) {
+        res <- clf_results(); if (is.null(res)) return()
+        png(file, width = 900, height = 600); f1_plot_fn(); dev.off()
+      }
+    )
+
+    # Context (+ plot) for the AI Co-Pilot.
+    list(
+      context = reactive({
+        res <- clf_results()
+        if (is.null(res)) return(paste0("One-vs-all Classification (binary logistic per class). Target: ",
+                                        input$target, " — not run yet."))
+        paste0("One-vs-all Classification (binary logistic per class). Target: ", input$target,
+               " ; threshold: ", input$threshold, "\n\nPer-class metrics:\n",
+               paste(utils::capture.output(print(res, row.names = FALSE)), collapse = "\n"))
+      }),
+      plot = function() f1_plot_fn()
+    )
+  })
+}

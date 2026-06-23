@@ -1,0 +1,61 @@
+# ==========================================================================
+# global.R  --  loaded once, shared by ui.R and server.R
+# --------------------------------------------------------------------------
+# Clean-rebuild scaffold. We add things back ONE component at a time and test
+# each before adding the next. The full previous app is preserved in:
+#   ui_legacy.R, server_legacy.R, global_legacy.R   (not sourced)
+# ==========================================================================
+
+library(shiny)
+library(bslib)
+library(shinyWidgets)
+
+# Allow large file uploads (LiDAR .laz point clouds can be hundreds of MB).
+# Default Shiny cap is 5 MB; raise to 3 GB.
+options(shiny.maxRequestSize = 3 * 1024^3)
+library(DT)
+library(readxl)
+library(tools)
+library(nnet)    # multinom() -> Logistic Regression
+library(nlme)    # lme()      -> Linear Mixed Effects
+library(MuMIn)   # r.squaredGLMM() -> LME performance
+library(randomForest)  # Random Forest
+library(pdp)           # Partial Dependence Plots
+library(ggplot2)       # Clustering / Classification plots
+library(cluster)       # daisy, pam, silhouette
+library(factoextra)    # fviz_*, get_dist
+library(ape)           # phylogenetic tree (clustering)
+library(MASS)          # lda/qda -> Discriminant Analysis
+# NOTE: klaR, kernlab, heplots, ggord are used by Discriminant Analysis via
+# requireNamespace() guards (optional methods) — NOT hard dependencies here.
+library(lidR)          # Spatial & LiDAR screens
+library(sf)
+library(terra)
+library(rgl)           # 3D point-cloud widget (interactive)
+library(scatterplot3d) # headless static 3D render (download + AI snapshot)
+
+# Shared stateless helpers + plotting engines.
+source("helpers.R")
+source("evaluation_function.R")  # uef_evaluation() for LiDAR model evaluation
+
+# Shared green theme used across the whole app.
+app_theme <- bs_theme(
+  preset   = "zephyr",
+  primary  = "#2e7d32",
+  secondary = "#4caf50",
+  success  = "#4caf50",
+  info     = "#4caf50"
+)
+
+# --- Modules are sourced here as we add them back, one at a time ---
+source("mod_data.R")
+source("mod_linear_regression.R")
+source("mod_lme.R")
+source("mod_anova.R")
+source("mod_logistic.R")
+source("mod_rf.R")
+source("mod_clustering.R")
+source("mod_classification.R")
+source("mod_da.R")
+source("mod_lidar.R")
+source("mod_chat.R")
