@@ -15,6 +15,7 @@
 # Uploading lives in the global left rail now, so there is no "Import Data" panel.
 dataToolsUI <- function(id) {
   ns <- NS(id)
+  tagList(
   accordion(
           id = ns("etl_accordion"),
           open = FALSE,
@@ -107,7 +108,8 @@ dataToolsUI <- function(id) {
             selectInput(ns("batch_targets"), "Select Datasets to Update:", choices = NULL, multiple = TRUE),
             actionButton(ns("apply_batch"), "Batch Apply Settings", class = "btn-danger btn-sm", width = "100%")
           )
-  )
+  )  # end accordion
+  )  # end tagList
 }
 
 # Center-canvas content for the Data view (Dataset Overview / Exploratory Plots).
@@ -115,10 +117,26 @@ dataCanvasUI <- function(id) {
   ns <- NS(id)
   navset_card_tab(
         nav_panel("Dataset Overview",
-          layout_columns(
-            col_widths = c(12),
-            card(card_header(class = "d-flex justify-content-between align-items-center bg-light", "Dataset Structure", downloadButton(ns("download_data"), "Download CSV", class = "btn-sm btn-outline-success")), div(style = "overflow-y: auto; height: 250px; padding: 5px;", verbatimTextOutput(ns("eng_str")))),
-            card(card_header(class = "d-flex justify-content-between align-items-center bg-light", "Active Column Distributions", downloadButton(ns("download_dist_plot"), "Download Plot", class = "btn-sm btn-outline-success")), div(style = "padding: 5px;", selectInput(ns("eng_view_col"), "View Frequency/Summary of:", choices = NULL), layout_columns(col_widths = c(6, 6), plotOutput(ns("eng_plot"), height = "350px"), div(style = "overflow-y: auto; height: 350px;", verbatimTextOutput(ns("eng_table"))))))
+          uiOutput(ns("overview_stats")),
+          card(
+            card_header(class = "d-flex justify-content-between align-items-center bg-light",
+              "Dataset Structure",
+              downloadButton(ns("download_data"), "Download CSV", class = "btn-sm btn-outline-success")),
+            div(style = "padding: 5px;", uiOutput(ns("eng_str")))
+          )
+        ),
+        nav_panel("Column Distributions",
+          card(
+            card_header(class = "d-flex justify-content-between align-items-center bg-light",
+              "Active Column Distributions",
+              downloadButton(ns("download_dist_plot"), "Download Plot", class = "btn-sm btn-outline-success")),
+            div(style = "padding: 5px;",
+              selectInput(ns("eng_view_col"), "View Frequency/Summary of:", choices = NULL),
+              layout_columns(col_widths = c(6, 6),
+                plotOutput(ns("eng_plot"), height = "350px"),
+                div(style = "overflow-y: auto; height: 350px;", verbatimTextOutput(ns("eng_table")))
+              )
+            )
           )
         ),
         nav_panel("Exploratory Plots",
@@ -142,6 +160,10 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     rv <- reactiveValues(working_data = NULL, current_rename_levels = NULL)
+    prev_state <- reactiveVal(NULL)  # one-step undo snapshot
+
+    # Helper: snapshot current state before any mutation
+    snap <- function() prev_state(rv$working_data)
 
     # NOTE: Uploading is handled globally in server.R (left Datasets rail) and
     # writes to raw_pool/dataset_pool. This module only consumes those pools.
@@ -154,10 +176,33 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$reset_data, {
       req(active_dataset())
+      snap()
       raw <- raw_pool[[active_dataset()]]
       rv$working_data <- raw
       dataset_pool[[active_dataset()]] <- raw
       showNotification("Dataset reset to original raw data across all tabs.", type = "message")
+    })
+
+    # ---- Undo last operation ----
+    observeEvent(input$undo_last, {
+      req(active_dataset())
+      prev <- prev_state()
+      if (is.null(prev)) { showNotification("Nothing to undo.", type = "warning"); return() }
+      rv$working_data <- prev
+      dataset_pool[[active_dataset()]] <- prev
+      prev_state(NULL)
+      showNotification("Last change undone.", type = "message")
+    })
+
+    # ---- Reset to original upload (top-bar button) ----
+    observeEvent(input$reset_raw, {
+      req(active_dataset())
+      orig <- raw_pool[[active_dataset()]]
+      if (is.null(orig)) { showNotification("No original data found.", type = "warning"); return() }
+      snap()
+      rv$working_data <- orig
+      dataset_pool[[active_dataset()]] <- orig
+      showNotification("Dataset restored to original upload.", type = "message")
     })
 
     # ---- Toolbox picker population ----
@@ -206,6 +251,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
     # ---- Column ops ----
     observeEvent(input$apply_subset, {
       req(active_dataset(), input$eng_subset_cols)
+      snap()
       full_raw <- raw_pool[[active_dataset()]]
       safe_cols <- intersect(input$eng_subset_cols, names(full_raw))
       df <- full_raw[, safe_cols, drop = FALSE]
@@ -216,6 +262,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_drop, {
       req(active_dataset(), input$eng_drop_cols)
+      snap()
       df <- rv$working_data
       df <- df[, !(names(df) %in% input$eng_drop_cols), drop = FALSE]
       rv$working_data <- df
@@ -225,6 +272,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_col_rename, {
       req(active_dataset(), input$rename_col_target, input$rename_col_new_name)
+      snap()
       df <- rv$working_data
       if (input$rename_col_new_name != "") {
         names(df)[names(df) == input$rename_col_target] <- input$rename_col_new_name
@@ -236,6 +284,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_mutate, {
       req(active_dataset(), input$mutate_col1, input$mutate_col2, input$mutate_op, input$mutate_new_name)
+      snap()
       df <- rv$working_data
       c1 <- df[[input$mutate_col1]]
       c2 <- df[[input$mutate_col2]]
@@ -274,6 +323,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_filter, {
       req(active_dataset(), input$filter_col, input$filter_op)
+      snap()
       df <- rv$working_data
       col_data <- df[[input$filter_col]]
       keep_idx <- tryCatch({
@@ -296,6 +346,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_bin, {
       req(active_dataset(), input$bin_col, input$bin_breaks, input$bin_labels, input$bin_new_name)
+      snap()
       df <- rv$working_data
       tryCatch({
         breaks_vec <- as.numeric(trimws(unlist(strsplit(input$bin_breaks, ","))))
@@ -316,6 +367,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_coalesce, {
       req(active_dataset(), input$coalesce_primary, input$coalesce_secondary)
+      snap()
       df <- rv$working_data
       prim <- df[[input$coalesce_primary]]
       sec <- df[[input$coalesce_secondary]]
@@ -329,6 +381,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_join, {
       req(active_dataset(), input$join_target, input$join_type, input$join_by)
+      snap()
       df1 <- rv$working_data
       df2 <- dataset_pool[[input$join_target]]
       if (!(input$join_by %in% names(df2))) {
@@ -353,6 +406,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
     # ---- Type conversion ----
     observeEvent(input$apply_conversion, {
       req(rv$working_data)
+      snap()
       df <- rv$working_data
       raw <- raw_pool[[active_dataset()]]
       tryCatch({
@@ -382,6 +436,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
     # ---- Aggregation ----
     observeEvent(input$apply_group, {
       req(rv$working_data, input$group_id, input$group_nums, input$group_cats, input$agg_method)
+      snap()
       df <- rv$working_data
       tryCatch({
         safe_nums <- paste0("`", input$group_nums, "`")
@@ -469,6 +524,15 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
     })
 
     # ---- Level management ----
+    # Refreshes delete_levels picker from current working data after any mutation.
+    refresh_delete_levels <- function() {
+      col <- input$delete_lvl_col
+      if (!isTruthy(col) || is.null(rv$working_data) || !col %in% names(rv$working_data)) return()
+      lvls <- unique(as.character(rv$working_data[[col]]))
+      lvls[is.na(lvls)] <- "NA"
+      updateSelectInput(session, "delete_levels", choices = lvls)
+    }
+
     output$dynamic_rename_ui <- renderUI({
       req(rv$working_data, input$rename_col)
       lvls <- as.character(unique(na.omit(rv$working_data[[input$rename_col]])))
@@ -483,6 +547,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_rename, {
       req(rv$working_data, input$rename_col, rv$current_rename_levels)
+      snap()
       df <- rv$working_data
       raw <- raw_pool[[active_dataset()]]
       col <- input$rename_col
@@ -501,6 +566,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
           raw_pool[[active_dataset()]] <- raw
         }
         showNotification(paste("Levels in", col, "successfully renamed globally and preserved."), type = "message")
+        refresh_delete_levels()
       }, error = function(e) { showNotification(paste("Rename Error:", e$message), type = "error") })
     })
 
@@ -512,6 +578,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_merge, {
       req(rv$working_data, input$agg_col, input$agg_levels, input$agg_new_name)
+      snap()
       df <- rv$working_data
       raw <- raw_pool[[active_dataset()]]
       df[[input$agg_col]] <- as.character(df[[input$agg_col]])
@@ -528,6 +595,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       updateTextInput(session, "agg_new_name", value = "")
       updateSelectInput(session, "agg_levels", selected = "")
       showNotification("Levels dynamically merged and preserved.", type = "message")
+      refresh_delete_levels()
     })
 
     observeEvent(input$delete_lvl_col, {
@@ -539,6 +607,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
 
     observeEvent(input$apply_delete_lvl, {
       req(rv$working_data, input$delete_lvl_col, input$delete_levels)
+      snap()
       df <- rv$working_data
       raw <- raw_pool[[active_dataset()]]
       
@@ -564,6 +633,7 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       
       updateSelectInput(session, "delete_levels", selected = "")
       showNotification(paste("Deleted selected levels. Rows remaining:", nrow(df)), type = "message")
+      refresh_delete_levels()
     })
 
     # ---- Dataset Overview ----
@@ -574,11 +644,101 @@ dataServer <- function(id, raw_pool, dataset_pool, dataset_names, active_dataset
       updateSelectInput(session, "eng_view_col", choices = cols, selected = curr_view)
     })
 
-    output$eng_str <- renderPrint({
-      req(rv$working_data)
-      cat("Active Variables:", ncol(rv$working_data), "| Total Observations:", nrow(rv$working_data), "\n")
-      cat("-----------------------------------------------------------------\n")
-      str(rv$working_data)
+    output$overview_stats <- renderUI({
+      df <- rv$working_data
+      req(!is.null(df), nrow(df) > 0)
+      n_complete  <- sum(complete.cases(df))
+      pct_complete <- round(100 * n_complete / nrow(df))
+      n_na_total  <- sum(is.na(df))
+      layout_columns(col_widths = c(2, 2, 2, 2, 2, 2),
+        value_box("Rows",        format(nrow(df), big.mark=","),
+                  showcase=icon("rows"),          theme="success"),
+        value_box("Columns",     ncol(df),
+                  showcase=icon("table-columns"), theme="secondary"),
+        value_box("Numeric",     sum(sapply(df, is.numeric)),
+                  showcase=icon("hashtag"),       theme="secondary"),
+        value_box("Categorical", sum(sapply(df, function(x) is.factor(x)||is.character(x))),
+                  showcase=icon("tag"),           theme="secondary"),
+        value_box("Total NA",    format(n_na_total, big.mark=","),
+                  showcase=icon("circle-question"),
+                  theme=if(n_na_total > 0) "warning" else "secondary"),
+        value_box("Complete rows", paste0(pct_complete, "%"),
+                  showcase=icon("circle-check"),
+                  theme=if(pct_complete == 100) "success" else "secondary")
+      )
+    })
+
+    output$eng_str <- renderUI({
+      df <- rv$working_data
+      req(!is.null(df), nrow(df) > 0)
+      n_rows <- nrow(df)
+
+      .tlbl <- function(x) {
+        if (inherits(x, c("Date","POSIXct","POSIXlt"))) "date"
+        else if (is.logical(x)) "lgl"
+        else if (is.integer(x)) "int"
+        else if (is.numeric(x)) "dbl"
+        else if (is.factor(x)) "fct"
+        else if (is.character(x)) "chr"
+        else class(x)[1]
+      }
+      .tcol <- function(lbl) switch(lbl,
+        dbl="#1565c0", int="#1565c0", fct="#2e7d32", chr="#33691e",
+        date="#6a1b9a", lgl="#e65100", "#555")
+
+      rows <- lapply(names(df), function(col) {
+        x      <- df[[col]]
+        n_na   <- sum(is.na(x))
+        pct_na <- 100 * n_na / n_rows
+        xc     <- na.omit(x)
+        lbl    <- .tlbl(x)
+        clr    <- .tcol(lbl)
+
+        detail <- if (is.numeric(x) && length(xc) > 0)
+          sprintf("min=%.3g  mean=%.3g  max=%.3g  sd=%.3g",
+                  min(xc), mean(xc), max(xc), sd(xc))
+        else if (is.factor(x) || is.character(x)) {
+          lvls <- sort(unique(as.character(xc)))
+          paste0(length(lvls), " levels: ",
+                 paste(head(lvls, 4), collapse=", "),
+                 if (length(lvls) > 4) "…" else "")
+        } else "—"
+
+        bg <- if (pct_na > 5) "#fff8e1"
+              else if (length(unique(xc)) <= 1 && length(xc) > 0) "#fce4ec"
+              else "transparent"
+
+        na_td <- if (n_na == 0)
+          tags$td(style="padding:4px 10px;color:#4caf50;font-size:12px;", "0")
+        else
+          tags$td(style="padding:4px 10px;color:#e65100;font-size:12px;",
+                  sprintf("%d (%.1f%%)", n_na, pct_na))
+
+        tags$tr(style=paste0("background:", bg, ";"),
+          tags$td(style="padding:4px 10px;font-weight:600;font-size:12px;", col),
+          tags$td(style="padding:4px 10px;",
+            tags$span(class="badge",
+                      style=paste0("background:", clr, "22;color:", clr,
+                                   ";font-size:10px;font-weight:600;border:1px solid ", clr, "44;"),
+                      lbl)),
+          na_td,
+          tags$td(style="padding:4px 10px;font-size:11px;color:#555;", detail)
+        )
+      })
+
+      tags$div(style="overflow-y:auto;max-height:420px;",
+        tags$table(class="table table-sm table-hover mb-0",
+          tags$thead(class="table-light",
+            tags$tr(
+              tags$th(style="font-size:11px;padding:4px 10px;", "Column"),
+              tags$th(style="font-size:11px;padding:4px 10px;", "Type"),
+              tags$th(style="font-size:11px;padding:4px 10px;", "N/A"),
+              tags$th(style="font-size:11px;padding:4px 10px;", "Profile")
+            )
+          ),
+          tags$tbody(rows)
+        )
+      )
     })
 
     output$eng_table <- renderPrint({

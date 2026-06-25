@@ -51,7 +51,9 @@ clusteringCanvasUI <- function(id) {
     layout_columns(
       col_widths = c(6, 6),
       card(
-        card_header(class = "bg-light", "Cluster Profiles (Raw Means)"),
+        card_header(class = "d-flex justify-content-between align-items-center bg-light",
+          "Cluster Profiles (Raw Means)",
+          downloadButton(ns("dl_profiles"), "CSV", class = "btn-sm btn-outline-secondary")),
         div(style = "overflow-y: auto; height: 300px; padding: 5px;", verbatimTextOutput(ns("summary")))
       ),
       card(
@@ -230,6 +232,24 @@ clusteringServer <- function(id, dataset_pool, active_dataset) {
       c_data <- get_clusters(); req(c_data)
       print(data.frame(Cluster = c_data$vector))
     })
+
+    output$dl_profiles <- downloadHandler(
+      filename = function() paste0("cluster_profiles_", Sys.Date(), ".csv"),
+      content  = function(file) {
+        req(length(input$vars) >= 2, !is.null(active_data()))
+        df_raw  <- active_data()
+        df_raw  <- df_raw[complete.cases(df_raw[, input$vars]), input$vars, drop = FALSE]
+        c_data  <- get_clusters(); req(c_data)
+        num_cols <- names(df_raw)[sapply(df_raw, is.numeric)]
+        if (length(num_cols) > 0) {
+          out <- aggregate(df_raw[, num_cols, drop = FALSE],
+                           by = list(Cluster = c_data$vector), FUN = mean)
+        } else {
+          out <- data.frame(Cluster = sort(unique(c_data$vector)))
+        }
+        write.csv(out, file, row.names = FALSE)
+      }
+    )
 
     # Context (+ plot) for the AI Co-Pilot.
     list(

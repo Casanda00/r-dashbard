@@ -26,10 +26,13 @@ anovaCanvasUI <- function(id) {
       ),
       div(style = "overflow-y: auto; height: 520px; padding: 5px;", uiOutput(ns("dynamic_plot_ui")))
     ),
+    uiOutput(ns("interp_ui")),
     layout_columns(
       col_widths = c(6, 6),
       card(
-        card_header(class = "bg-light", "ANOVA Table"),
+        card_header(class = "d-flex justify-content-between align-items-center bg-light",
+          "ANOVA Table",
+          downloadButton(ns("dl_summary"), "CSV", class = "btn-sm btn-outline-secondary")),
         div(style = "overflow-y: auto; height: 300px; padding: 5px;", verbatimTextOutput(ns("summary")))
       ),
       card(
@@ -109,6 +112,37 @@ anovaServer <- function(id, dataset_pool, active_dataset) {
         png(file, width = 800, height = 600)
         plot_aov_diagnostics(aov_model(), input$view_mode, input$zoom_target)
         dev.off()
+      }
+    )
+
+    output$interp_ui <- renderUI({
+      m <- aov_model(); req(!is.character(m))
+      sm  <- summary(m)[[1]]
+      f   <- sm[["F value"]][[1]]
+      p   <- sm[["Pr(>F)"]][[1]]
+      sig_word <- if (!is.na(p) && p < 0.05) "significant" else "not significant"
+      tk  <- tryCatch({
+        th <- TukeyHSD(m)[[input$x]]
+        sum(th[, "p adj"] < 0.05, na.rm = TRUE)
+      }, error = function(e) NA)
+      sent <- paste0(
+        "One-way ANOVA found a <b>", sig_word, "</b> effect of <b>", input$x,
+        "</b> on <b>", input$y, "</b>",
+        sprintf(" (F = %.2f, p = %.4f)", f, p),
+        if (!is.na(tk)) paste0(". Post-hoc Tukey tests identified <b>", tk,
+                               " significant</b> pairwise comparison(s)") else "",
+        "."
+      )
+      card(tags$div(class = "p-3 small", HTML(sent)))
+    })
+
+    output$dl_summary <- downloadHandler(
+      filename = function() paste0("anova_results_", Sys.Date(), ".csv"),
+      content  = function(file) {
+        m <- aov_model(); req(!is.character(m))
+        sm <- as.data.frame(summary(m)[[1]])
+        sm <- cbind(Term = rownames(sm), sm)
+        write.csv(sm, file, row.names = FALSE)
       }
     )
 

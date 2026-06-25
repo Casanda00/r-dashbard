@@ -27,7 +27,9 @@ rfCanvasUI <- function(id) {
     # Variable importance gets its own full-width, tall panel so labels/points are readable.
     card(
       card_header(class = "d-flex justify-content-between align-items-center bg-light", "Variable Importance",
-                  downloadButton(ns("download_varimp"), "Download Plot", class = "btn-sm btn-outline-success")),
+                  div(class = "d-flex gap-2",
+                    downloadButton(ns("dl_importance"), "CSV", class = "btn-sm btn-outline-secondary"),
+                    downloadButton(ns("download_varimp"), "Download Plot", class = "btn-sm btn-outline-success"))),
       div(style = "padding: 5px;", plotOutput(ns("varimp"), height = "460px"))
     ),
     card(
@@ -102,6 +104,21 @@ rfServer <- function(id, dataset_pool, active_dataset) {
         cat("\n\n--- 10-Fold CV Error by Number of Variables ---\n")
         print(obj$cv$error.cv)
       }
+      cat("\n--- Prediction Accuracy (OOB) ---\n")
+      tryCatch({
+        if (obj$model$type == "regression") {
+          oob_pred <- obj$model$predicted
+          obs      <- obj$data[[obj$target]]
+          keep     <- !is.na(oob_pred)
+          m        <- uef_evaluation(oob_pred[keep], obs[keep])
+          cat(sprintf("RMSE   : %.4f\nR²     : %.4f\nBias   : %.4f\nRelBias: %.4f\nRRMSE  : %.4f\n",
+                      m$RMSE, m$R2, m$Bias, m$RelBias, m$RRMSE))
+        } else {
+          oob_err <- obj$model$err.rate[obj$model$ntree, "OOB"]
+          cat(sprintf("OOB Classification Error: %.4f  (Accuracy: %.4f)\n", oob_err, 1 - oob_err))
+          cat("RMSE/Bias/RRMSE are not applicable for classification targets.\n")
+        }
+      }, error = function(e) cat("Metrics error:", e$message, "\n"))
     })
 
     varimp_fn <- function() {
@@ -110,6 +127,15 @@ rfServer <- function(id, dataset_pool, active_dataset) {
       randomForest::varImpPlot(obj$model, main = paste("Variable Importance for", obj$target))
     }
     output$varimp <- renderPlot({ varimp_fn() })
+    output$dl_importance <- downloadHandler(
+      filename = function() paste0("rf_importance_", Sys.Date(), ".csv"),
+      content  = function(file) {
+        obj <- rf_model_obj(); req(!is.null(obj))
+        imp <- as.data.frame(randomForest::importance(obj$model))
+        imp <- cbind(variable = rownames(imp), imp)
+        write.csv(imp, file, row.names = FALSE)
+      }
+    )
     output$download_varimp <- downloadHandler(
       filename = function() { paste0("rf_variable_importance_", Sys.Date(), ".png") },
       content = function(file) { png(file, width = 1000, height = 700); varimp_fn(); dev.off() }

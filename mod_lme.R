@@ -56,7 +56,9 @@ lmeCanvasUI <- function(id) {
     layout_columns(
       col_widths = c(6, 6),
       card(
-        card_header(class = "bg-light", "Model Summary"),
+        card_header(class = "d-flex justify-content-between align-items-center bg-light",
+          "Model Summary",
+          downloadButton(ns("dl_fixed_effects"), "CSV", class = "btn-sm btn-outline-secondary")),
         div(class = "formula-box", style = "padding: 10px; background-color: #e9ecef; border-bottom: 1px solid #dee2e6;", textOutput(ns("formula_display"))),
         div(style = "overflow-y: auto; height: 400px; padding: 5px;", verbatimTextOutput(ns("summary")))
       ),
@@ -173,6 +175,14 @@ lmeServer <- function(id, dataset_pool, active_dataset) {
         vifs <- diag(solve(cor_mat))
         print(vifs)
       }, error = function(e) { cat("VIF not available for this model structure.") })
+      cat("\n=== Prediction Accuracy (training data) ===\n")
+      tryCatch({
+        pred <- fitted(obj$model)
+        obs  <- pred + resid(obj$model, type = "response")
+        m    <- uef_evaluation(pred, obs)
+        cat(sprintf("RMSE   : %.4f\nR²     : %.4f\nBias   : %.4f\nRelBias: %.4f\nRRMSE  : %.4f\n",
+                    m$RMSE, m$R2, m$Bias, m$RelBias, m$RRMSE))
+      }, error = function(e) cat("Metrics error:", e$message, "\n"))
     })
 
     diag_fn <- function() {
@@ -193,6 +203,16 @@ lmeServer <- function(id, dataset_pool, active_dataset) {
     output$download_plot <- downloadHandler(
       filename = function() { paste0("lme_diagnostics_", Sys.Date(), ".png") },
       content = function(file) { png(file, width = 900, height = 450); diag_fn(); dev.off() }
+    )
+
+    output$dl_fixed_effects <- downloadHandler(
+      filename = function() paste0("lme_fixed_effects_", Sys.Date(), ".csv"),
+      content  = function(file) {
+        obj <- model_obj(); req(!is.null(obj))
+        fe  <- as.data.frame(summary(obj$model)$tTable)
+        fe  <- cbind(term = rownames(fe), fe)
+        write.csv(fe, file, row.names = FALSE)
+      }
     )
 
     # Context (+ plot) for the AI Co-Pilot.

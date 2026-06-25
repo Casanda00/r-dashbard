@@ -166,6 +166,33 @@ plot_aov_diagnostics <- function(model, view_mode, target) {
   }
 }
 
+.quality_check <- function(df) {
+  msgs <- character(0)
+  pct_missing <- 100 * mean(is.na(df))
+  if (pct_missing > 20)
+    msgs <- c(msgs, sprintf("<b>%.1f%%</b> of values are missing — consider imputation or column removal.", pct_missing))
+  else if (pct_missing > 5)
+    msgs <- c(msgs, sprintf("<b>%.1f%%</b> of values are missing.", pct_missing))
+  n_dup <- sum(duplicated(df))
+  if (n_dup > 0)
+    msgs <- c(msgs, sprintf("<b>%d duplicate row(s)</b> detected.", n_dup))
+  near_const <- names(df)[sapply(df, function(x) {
+    tbl <- table(x, useNA = "no")
+    length(tbl) > 0 && max(tbl) / sum(tbl) > 0.95
+  })]
+  if (length(near_const) > 0)
+    msgs <- c(msgs, sprintf("Near-constant column(s): <b>%s</b>", paste(near_const, collapse = ", ")))
+  num_nms <- names(df)[sapply(df, is.numeric)]
+  skewed <- sum(sapply(num_nms, function(v) {
+    x <- na.omit(df[[v]])
+    if (length(x) < 5 || sd(x) == 0) return(FALSE)
+    abs(mean((x - mean(x))^3) / sd(x)^3) > 2
+  }))
+  if (skewed > 0)
+    msgs <- c(msgs, sprintf("<b>%d numeric column(s)</b> are highly skewed — log transform may help.", skewed))
+  msgs
+}
+
 plot_lm_diagnostics <- function(model, dataset, y_var, view_mode, target) {
   if (is.character(model)) {
     show_placeholder(model)
